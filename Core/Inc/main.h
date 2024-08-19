@@ -63,6 +63,8 @@ void Error_Handler(void);
 #define KEY_GPIO_Port GPIOA
 #define SD_DETECT_Pin GPIO_PIN_3
 #define SD_DETECT_GPIO_Port GPIOA
+#define OUT_Pin GPIO_PIN_8
+#define OUT_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
