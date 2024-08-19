@@ -245,7 +245,7 @@ int readBlock(int blockN) { // 1 - block read, 0 - failed to read block / no blo
 
 		res = f_read(&fsrc, fileBuffer, blockSize, &br);
 		if(res != FR_OK || br == 0) {
-
+			f_close(&fsrc);
 			//unmount
 			f_mount(0, SDPath, 0);
 			return 0;
