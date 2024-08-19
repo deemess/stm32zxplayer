@@ -166,7 +166,11 @@ void drawPlaying() {
 	ssd1306_Line(0, 10+2, 127, 10+2, White);
 	line++; //Skip line
 	ssd1306_SetCursor(3, (line++)*10+3); //Draw menu
-	ssd1306_WriteString("Playing", Font_7x10, White);
+	if(blockSize == 0) {
+		ssd1306_WriteString("Done", Font_7x10, White);
+	} else {
+		ssd1306_WriteString("Playing...", Font_7x10, White);
+	}
 	ssd1306_SetCursor(3, (line)*10+3);
 	sprintf(buff, "Block: %d", blockNumber-1);
 	ssd1306_WriteString(buff, Font_7x10, White);
@@ -174,8 +178,21 @@ void drawPlaying() {
 	ssd1306_UpdateScreen();
 }
 
+void drawMenu() {
+	switch(menu) {
+	case 0:
+		drawFileMenu();
+		break;
+	case 1:
+		drawPlayMenu();
+		break;
+	case 2:
+		drawPlaying();
+		break;
+	}
+}
 
-void readBlock(int blockN) {
+int readBlock(int blockN) { // 1 - block read, 0 - failed to read block / no block
 	FIL fsrc;
 	FRESULT res;
 
@@ -190,7 +207,7 @@ void readBlock(int blockN) {
 		menu = 1; //goto play menu
 		//unmount
 		f_mount(0, SDPath, 0);
-		return;
+		return 0;
 	}
 
 	strcpy(filePullPath, dirpath);
@@ -201,10 +218,9 @@ void readBlock(int blockN) {
 	res = f_open(&fsrc, filePullPath, FA_READ);
 	LEDOFF;
 	if(res != FR_OK) {
-		menu = 1; //goto play menu
 		//unmount
 		f_mount(0, SDPath, 0);
-		return;
+		return 0;
 	}
 
 	for(int i=0; i<blockN; i++) { //read block
@@ -212,35 +228,34 @@ void readBlock(int blockN) {
 		res = f_read(&fsrc, fileBuffer, 2, &br);
 		LEDOFF;
 		if(res != FR_OK || br == 0) {
-			menu = 1; //goto play menu
 			f_close(&fsrc);
 			//unmount
 			f_mount(0, SDPath, 0);
-			return;
+			return 0;
 		}
 
 		blockSize = ((unsigned short*)fileBuffer)[0];
 		if(blockSize >= sizeof fileBuffer) {
-			menu = 1; //goto play menu
 			f_close(&fsrc);
 			//unmount
 			f_mount(0, SDPath, 0);
-			return;
+			return 0;
 		}
 
 		res = f_read(&fsrc, fileBuffer, blockSize, &br);
 		if(res != FR_OK || br == 0) {
-			menu = 1; //goto play menu
 			f_close(&fsrc);
 			//unmount
 			f_mount(0, SDPath, 0);
-			return;
+			return 0;
 		}
 	}
 
 	f_close(&fsrc);
 	//unmount
 	f_mount(0, SDPath, 0);
+
+	return 1;
 }
 
 int pilotPulses;
@@ -251,14 +266,15 @@ int bitn;
 int l=0;
 
 void playNextPulse() {
-	OUT_HI; //start pulse
 	l=0;
 
 	if(currentPulseType == 0 && pilotPulses-- > 0) { //pilot pulse
+		OUT_HI; //pulse begins from HI
 		__HAL_TIM_SET_AUTORELOAD(&htim1, 2168-1);
 		return;
 	} else {
 		if(currentPulseType == 0) { //start pulse
+			OUT_HI; //pulse begins from HI
 			currentPulseType = 3;
 			bitn=7;
 			__HAL_TIM_SET_AUTORELOAD(&htim1, 735-1);
@@ -273,23 +289,26 @@ void playNextPulse() {
 		}
 		if(currentPulseType == 5 && pausePulses-- > 0) { //pause pulses
 			OUT_LOW;
-			__HAL_TIM_SET_AUTORELOAD(&htim1, 2168-1);
+			__HAL_TIM_SET_AUTORELOAD(&htim1, 1084-1);
 			return;
 		}
 		if(currentPulseType == 5) { //Stop playing
 			OUT_LOW;
-			readBlock(blockNumber++);
-			if(blockSize != 0) { //Play next block
-				drawPlaying();
+			if(readBlock(blockNumber++)) { //Play next block
 				pilotPulses = 4000;
 				blockPos= 0;
 				currentPulseType = 0; //pilot
 				playNextPulse();
 			} else {
+				//stay in current menu
 				HAL_TIM_Base_Stop_IT(&htim1);
 			}
+			drawMenu();
 			return;
 		}
+
+		//Bit data pulses
+		OUT_HI; //pulse begins from HI
 		if(bitn < 0) {
 			bitn = 7;
 			blockPos++;
@@ -333,17 +352,17 @@ void playBlock() {
 
 void startPlaying() {
 	blockNumber=1;
-	readBlock(blockNumber++);
-	drawPlaying();
-	playBlock();
+	if(readBlock(blockNumber++) == 0) {
+		menu = 1;
+	} else {
+		playBlock();
+	}
 }
 
 void stopPlaying() {
 	HAL_TIM_Base_Stop_IT(&htim1);
 	OUT_LOW;
 }
-
-
 
 void cursor_down() {
 	if(menu == 0) {
@@ -356,19 +375,18 @@ void cursor_down() {
 		if(dirpos < cursor-5) {
 			dirpos = cursor-5;
 		}
-		drawFileMenu();
 	} else if(menu == 1) {
 		if(playMenuCursor+1 < playMenuItems) {
 			playMenuCursor++;
 		} else {
 			playMenuCursor = 0;
 		}
-		drawPlayMenu();
 	} else if(menu == 2) {
 		menu=1;
 		stopPlaying();
-		drawPlayMenu();
 	}
+
+	drawMenu();
 }
 
 void cursor_enter() {
@@ -388,11 +406,9 @@ void cursor_enter() {
 			}
 			cursor = 0;
 			dirpos = 0;
-			drawFileMenu();
 		} else {
 			menu = 1;
 			playMenuCursor = 0;
-			drawPlayMenu();
 		}
 	} else if(menu == 1) { //Play menu
 		if(playMenuCursor == 0) { //Play
@@ -400,9 +416,10 @@ void cursor_enter() {
 			startPlaying();
 		} else if(playMenuCursor == 2) { //Exit
 			menu = 0;
-			drawFileMenu();
 		}
 	}
+
+	drawMenu();
 }
 
 
